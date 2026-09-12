@@ -1,0 +1,31 @@
+# Databricks Apps deployment config.
+#
+# `valueFrom` entries below reference Databricks App resources (secrets) by
+# key name — adjust these keys to whatever you actually name the resources
+# when you attach them to this app (Compute -> Apps -> this app -> App
+# resources), or replace with plain `value:` entries for a quick manual test.
+command: ["python", "app.py"]
+
+env:
+  - name: "DATABRICKS_SERVER_HOSTNAME_DEV"
+    valueFrom: "databricks-server-hostname-dev"
+  - name: "DATABRICKS_HTTP_PATH_DEV"
+    valueFrom: "databricks-http-path-dev"
+  - name: "DATABRICKS_CLIENT_ID_DEV"
+    valueFrom: "databricks-client-id-dev"
+  - name: "DATABRICKS_CLIENT_SECRET_DEV"
+    valueFrom: "databricks-client-secret-dev"
+  - name: "DATABRICKS_SERVER_HOSTNAME_PROD"
+    valueFrom: "databricks-server-hostname-prod"
+  - name: "DATABRICKS_HTTP_PATH_PROD"
+    valueFrom: "databricks-http-path-prod"
+  - name: "DATABRICKS_CLIENT_ID_PROD"
+    valueFrom: "databricks-client-id-prod"
+  - name: "DATABRICKS_CLIENT_SECRET_PROD"
+    valueFrom: "databricks-client-secret-prod"
+  - name: "CATALOG"
+    value: "dev"
+  - name: "SCHEMA"
+    value: "retail"
+  - name: "CORS_ORIGIN"
+    value: "http://localhost:5173"

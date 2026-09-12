@@ -1,0 +1,26 @@
+{
+  "name": "loyalty-agent-proxy",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Backend proxy for the SAW Loyalty Agent frontend: holds the Azure identity used to call the Azure AI Foundry Agent Service, so no secret or token ever reaches the browser.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p .",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@azure/identity": "^4.13.2",
+    "axios": "^1.7.9",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.16.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.2"
+  }
+}
