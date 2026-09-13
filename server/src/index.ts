@@ -4,37 +4,55 @@ import { fileURLToPath } from 'node:url'
 import express from 'express'
 import cors from 'cors'
 import { agentProxyRouter, agentProxyErrorHandler } from './agentProxy.js'
-import { approvalsProxyRouter, approvalsProxyErrorHandler } from './approvalsProxy.js'
+import { approvalsRouter } from './approvals/approvalsRouter.js'
+import { toolsRouter } from './approvals/toolsRouter.js'
+import { approvalsErrorHandler } from './approvals/http.js'
+import { startDatabricksTokenRefresh } from './approvals/databricks.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-// Populated at deploy time by copying the built React app (root `npm run
-// build` output) here — see the deploy steps in the repo root README. Not
-// present in local dev, where the frontend runs on its own via `npm run dev`.
+// The built React app (`npm run build` -> dist/public), served by this same
+// process so the whole thing deploys as one Azure Web App. In local dev the
+// frontend runs on Vite's own server instead and proxies /agent, /api and
+// /tools back here (see vite.config.ts), so this directory is simply absent.
 const STATIC_DIR = path.join(__dirname, '../public')
 
 const app = express()
-const PORT = Number(process.env.DATABRICKS_APP_PORT || process.env.PORT || 8787)
-const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173'
+const PORT = Number(process.env.PORT || process.env.WEBSITES_PORT || 8787)
+// Everything is same-origin in the combined app, so CORS is off unless an
+// origin is explicitly configured (e.g. to keep a separately hosted frontend
+// working during a migration).
+const CORS_ORIGIN = process.env.CORS_ORIGIN || ''
 
-app.use(cors({ origin: CORS_ORIGIN }))
+if (CORS_ORIGIN) {
+  app.use(cors({ origin: CORS_ORIGIN, methods: ['GET', 'POST', 'PATCH', 'OPTIONS'] }))
+}
 app.use(express.json())
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }))
 
+// Azure AI Foundry agent proxy — holds this app's Azure identity so no token
+// or subscription key ever reaches the browser.
 app.use('/agent', agentProxyRouter)
-app.use(agentProxyErrorHandler)
+app.use('/agent', agentProxyErrorHandler)
 
-app.use('/approvals-api', approvalsProxyRouter)
-app.use(approvalsProxyErrorHandler)
+// Cluster-head approvals API, read/written by the SPA (same origin).
+app.use('/api/approvals', approvalsRouter)
+app.use('/api/approvals', approvalsErrorHandler)
+
+// OpenAPI tool endpoints the Foundry Loyalty-Agent calls directly.
+app.use('/tools', toolsRouter)
+app.use('/tools', approvalsErrorHandler)
 
 // Serve the built frontend (if present) with a SPA fallback, so this one
-// process can be deployed as the app's single public listener.
+// process is the app's single public listener.
 app.use(express.static(STATIC_DIR))
 app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/agent') || req.path.startsWith('/approvals-api')) return next()
+  if (/^\/(agent|api|tools|healthz)\b/.test(req.path)) return next()
   res.sendFile(path.join(STATIC_DIR, 'index.html'), (err) => err && next(err))
 })
 
+startDatabricksTokenRefresh()
+
 app.listen(PORT, () => {
-  console.log(`loyalty-agent-proxy listening on :${PORT} (CORS origin: ${CORS_ORIGIN})`)
+  console.log(`uc-store-associate listening on :${PORT}${CORS_ORIGIN ? ` (CORS origin: ${CORS_ORIGIN})` : ''}`)
 })

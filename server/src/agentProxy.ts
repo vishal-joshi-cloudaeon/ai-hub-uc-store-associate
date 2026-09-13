@@ -4,9 +4,13 @@ import { getAccessToken } from './azureToken.js'
 
 type EnvName = 'dev' | 'prod'
 
-// dev now goes through the APIM "AI Hub" gateway (subscription-key auth, its
-// own request/response shape) instead of calling Foundry's Responses API
-// directly with AAD — prod stays on the direct path below.
+// Both environments now go through an APIM "AI Hub" gateway (subscription-key
+// auth, its own request/response shape) rather than calling Foundry's
+// Responses API directly with AAD — dev via apim-01, prod via apim-02, each
+// with its own subscription key. The `aad` variant below is the direct-Foundry
+// path; it's kept as a known-good fallback (point FOUNDRY_AGENT_ENDPOINT_* at
+// a bare project URL, e.g. https://<resource>.services.ai.azure.com/api/projects/<project>)
+// but nothing selects it today.
 type FoundryEnvConfig =
   | { authType: 'apimKey'; endpoint: string; agentId: string; subscriptionKey: string }
   | { authType: 'aad'; endpoint: string; agentId: string }
@@ -21,9 +25,10 @@ const ENV_CONFIG: Record<EnvName, FoundryEnvConfig> = {
     subscriptionKey: process.env.APIM_SUBSCRIPTION_KEY_DEV || '',
   },
   prod: {
-    authType: 'aad',
+    authType: 'apimKey',
     endpoint: (process.env.FOUNDRY_AGENT_ENDPOINT_PROD || '').replace(/\/+$/, ''),
     agentId: process.env.FOUNDRY_AGENT_ID_PROD || '',
+    subscriptionKey: process.env.APIM_SUBSCRIPTION_KEY_PROD || '',
   },
 }
 
@@ -36,12 +41,12 @@ function getConfig(env: EnvName): FoundryEnvConfig {
   if (!config.endpoint || !config.agentId) {
     throw new Error(
       `Foundry "${env}" environment is not configured. Set FOUNDRY_AGENT_ENDPOINT_${env.toUpperCase()} ` +
-        `and FOUNDRY_AGENT_ID_${env.toUpperCase()} in server/.env.`
+        `and FOUNDRY_AGENT_ID_${env.toUpperCase()} in .env.`
     )
   }
   if (config.authType === 'apimKey' && !config.subscriptionKey) {
     throw new Error(
-      `APIM subscription key not configured for "${env}". Set APIM_SUBSCRIPTION_KEY_${env.toUpperCase()} in server/.env.`
+      `APIM subscription key not configured for "${env}". Set APIM_SUBSCRIPTION_KEY_${env.toUpperCase()} in .env.`
     )
   }
   return config
@@ -59,16 +64,19 @@ function getFoundryClient(baseURL: string): AxiosInstance {
 
 export const agentProxyRouter = Router()
 
-// prod is invoked through Azure AI Foundry's Responses API
-// (POST /openai/responses), not the classic Assistants threads/runs API —
-// the agent's own "Agent ID" isn't an `asst_...` id, it's a plain
-// agent_reference by name. Multi-turn continuity is a `previous_response_id`
-// pointer (like the old Assistants API's thread id, but stateless on our
-// side — the frontend just carries the last response's id forward).
+// Both environments are invoked through the APIM "AI Hub" gateway: a single
+// POST to its `/invoke` route, subscription-key auth, and the agent reference
+// nested under `agent_reference`. The URL carries the full path, so there's no
+// `api-version` query param on this path.
 //
-// dev is invoked through the APIM "AI Hub" gateway instead: a single
-// POST to its `/invoke` route, subscription-key auth, and the agent
-// reference nested under `agent_reference` rather than `agent`.
+// The `aad` branch below targets Azure AI Foundry's Responses API directly
+// (POST /openai/responses), not the classic Assistants threads/runs API — the
+// agent's own "Agent ID" isn't an `asst_...` id, it's a plain agent_reference
+// by name, and there it's nested under `agent` rather than `agent_reference`.
+//
+// Either way, multi-turn continuity is a `previous_response_id` pointer (like
+// the old Assistants API's thread id, but stateless on our side — the frontend
+// just carries the last response's id forward).
 agentProxyRouter.post('/responses', async (req, res, next) => {
   try {
     const env = resolveEnv(req.body.env)

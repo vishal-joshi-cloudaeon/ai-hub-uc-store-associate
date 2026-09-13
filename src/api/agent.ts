@@ -3,14 +3,14 @@ import type { Message, MessageState, ToolCall } from '../types'
 import type { EnvName } from '../config/environments'
 
 // The browser never talks to Azure AI Foundry directly, and never holds a
-// Foundry API key or AAD token — it only calls our own backend proxy
-// (server/), which authenticates to Foundry using its own Azure identity
-// (managed identity in production, `az login`/service principal locally).
-// See server/README or the root README for why.
-const AGENT_API_BASE = ((import.meta.env.VITE_AGENT_API_URL as string) || 'http://localhost:8787/agent').replace(
-  /\/+$/,
-  ''
-)
+// Foundry API key or AAD token — it only calls this app's own backend proxy
+// (server/src/agentProxy.ts), which authenticates to Foundry using its own
+// Azure identity (managed identity in production, `az login`/service
+// principal locally). See the root README for why.
+//
+// Same-origin by default: the backend serves this bundle in production, and
+// Vite proxies /agent to it in dev (see vite.config.ts).
+const AGENT_API_BASE = ((import.meta.env.VITE_AGENT_API_URL as string) || '/agent').replace(/\/+$/, '')
 
 const client = axios.create({
   baseURL: AGENT_API_BASE,

@@ -6,11 +6,12 @@ export type EnvConfig = {
   /** Tailwind classes for the EnvBadge — kept here so badge styling stays
    * data-driven rather than hardcoded per environment in the component. */
   badgeClassName: string
-  /** Base URL of the approvals-service backend. Normally the SAME single
-   * instance for both environments — it switches Databricks connections
-   * internally based on the `env` query param it receives on each request.
-   * Only set VITE_APPROVALS_API_URL_DEV/_PROD to different values if you
-   * actually deploy separate instances per environment. */
+  /** Base URL of the approvals API. Empty by default: it's served by this
+   * same app (server/src/approvals), so the browser calls its own origin.
+   * One backend serves both environments — it switches Databricks
+   * connections internally based on the `env` query param each request
+   * carries. Only set VITE_APPROVALS_API_URL_DEV/_PROD if you point an
+   * environment at a separately hosted backend. */
   approvalsApiUrl: string
 }
 
@@ -19,13 +20,13 @@ const ENV_CONFIG: Record<EnvName, EnvConfig> = {
     name: 'dev',
     label: 'DEV',
     badgeClassName: 'bg-blue-50 text-blue-700 border-blue-200',
-    approvalsApiUrl: (import.meta.env.VITE_APPROVALS_API_URL_DEV as string) || 'http://localhost:8000',
+    approvalsApiUrl: (import.meta.env.VITE_APPROVALS_API_URL_DEV as string) || '',
   },
   prod: {
     name: 'prod',
     label: 'PROD',
     badgeClassName: 'bg-green-50 text-green-700 border-green-200',
-    approvalsApiUrl: (import.meta.env.VITE_APPROVALS_API_URL_PROD as string) || 'http://localhost:8000',
+    approvalsApiUrl: (import.meta.env.VITE_APPROVALS_API_URL_PROD as string) || '',
   },
 }
 
