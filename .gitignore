@@ -1,7 +1,9 @@
 node_modules
 frontend/dist
 dist
+server/public
 *.tsbuildinfo
+.databricks
 .env
 .env.local
 *.local

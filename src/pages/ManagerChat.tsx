@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Message, Store } from '../types'
 import ChatMessage from '../components/ChatMessage'
 import EnvBadge from '../components/EnvBadge'
+import SuggestedQuestions from '../components/SuggestedQuestions'
+import { RECOMMENDED_QUESTIONS } from '../config/recommendedQuestions'
 import { useAgentChat } from '../hooks/useAgentChat'
 import { useApprovalPolling } from '../hooks/useApprovalPolling'
 import { useEnv } from '../hooks/useEnv'
@@ -77,6 +79,20 @@ export default function ManagerChat() {
     await chat.send(trimmed)
   }
 
+  const handleSuggestedClick = async (question: string) => {
+    if (isInputDisabled) return
+    await chat.send(question)
+  }
+
+  // Stage 1: only the first recommended question, before anything is sent.
+  // Stage 2: the remaining two, once the first response has come back.
+  // After that, the manager is free-typing — no more suggestions to avoid
+  // clutter. "Clear Demo" resets `messages` to [], which puts this straight
+  // back to stage 1.
+  const userMessageCount = messages.filter((m) => m.role === 'user').length
+  const showFirstSuggestion = userMessageCount === 0 && !isInputDisabled
+  const showRemainingSuggestions = userMessageCount === 1 && !isInputDisabled
+
   const inputPlaceholder = useMemo(
     () => (isAwaitingApproval ? 'Awaiting cluster head approval...' : 'Message the loyalty agent...'),
     [isAwaitingApproval]
@@ -93,26 +109,49 @@ export default function ManagerChat() {
             </div>
             <span className="text-xs text-text-muted">Loyalty agent</span>
           </div>
-          <select
-            value={storeId}
-            onChange={(e) => handleStoreChange(e.target.value)}
-            className="w-full rounded-card border border-border bg-white px-3 py-1.5 text-sm text-text-primary transition focus:border-text-secondary focus:outline-none sm:w-auto"
-          >
-            {STORES.map((store) => (
-              <option key={store.store_id} value={store.store_id}>
-                {store.store_id} {store.store_name}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              value={storeId}
+              onChange={(e) => handleStoreChange(e.target.value)}
+              className="w-full rounded-card border border-border bg-white px-3 py-1.5 text-sm text-text-primary transition focus:border-text-secondary focus:outline-none sm:w-auto"
+            >
+              {STORES.map((store) => (
+                <option key={store.store_id} value={store.store_id}>
+                  {store.store_id} {store.store_name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => chat.clear()}
+              className="flex-shrink-0 rounded-card border border-border bg-white px-3 py-1.5 text-sm text-text-secondary transition hover:bg-gray-50"
+            >
+              Clear Demo
+            </button>
+          </div>
         </header>
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto bg-chat-bg py-4">
           {messages.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-sm text-text-muted">
-              Start a conversation with the loyalty agent.
+            <div className="flex h-full flex-col items-center justify-center gap-4 px-4 text-sm text-text-muted">
+              <span>Start a conversation with the loyalty agent.</span>
+              {showFirstSuggestion && (
+                <div className="w-full max-w-sm">
+                  <SuggestedQuestions
+                    questions={[RECOMMENDED_QUESTIONS[0]]}
+                    onSelect={handleSuggestedClick}
+                  />
+                </div>
+              )}
             </div>
           ) : (
             messages.map((message) => <ChatMessage key={message.id} message={message} />)
+          )}
+          {showRemainingSuggestions && (
+            <SuggestedQuestions
+              questions={RECOMMENDED_QUESTIONS.slice(1)}
+              onSelect={handleSuggestedClick}
+            />
           )}
           {approvalError && (
             <div className="px-4 py-2">

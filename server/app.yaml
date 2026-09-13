@@ -1,0 +1,31 @@
+# Databricks Apps deployment config for the combined UI app: this Express
+# process serves the built React SPA (copied into ./public at deploy time)
+# AND the /agent Foundry proxy, as the app's single public listener.
+#
+# FOUNDRY_AGENT_ENDPOINT_DEV / FOUNDRY_AGENT_ID_DEV are copied from
+# server/.env (not secret — a Foundry project/agent name, not a credential).
+# AZURE_TENANT_ID/AZURE_CLIENT_ID/AZURE_CLIENT_SECRET are the
+# "saw-web-app-deployment" Azure AD app registration DefaultAzureCredential
+# picks up via EnvironmentCredential (see src/azureToken.ts) — it needs an
+# RBAC role (e.g. "Foundry User") on dta-euw-prod-aifoundry-01, granted at
+# the dta-euw-prod-rg-ai-01 resource-group scope, for actual chat calls to
+# succeed (token acquisition alone isn't enough).
+command: ["node", "dist/index.js"]
+
+env:
+  - name: "FOUNDRY_AGENT_ENDPOINT_DEV"
+    value: "https://dta-euw-prod-aifoundry-01.services.ai.azure.com/api/projects/aibuild"
+  - name: "FOUNDRY_AGENT_ID_DEV"
+    value: "Loyalty-Agent"
+  - name: "FOUNDRY_API_VERSION"
+    value: "2025-05-15-preview"
+  - name: "AZURE_TOKEN_SCOPE"
+    value: "https://ai.azure.com/.default"
+  - name: "CORS_ORIGIN"
+    value: "https://uc-store-associate-ui-7405619621865526.6.azure.databricksapps.com"
+  - name: "AZURE_TENANT_ID"
+    valueFrom: "azure-tenant-id"
+  - name: "AZURE_CLIENT_ID"
+    valueFrom: "azure-client-id"
+  - name: "AZURE_CLIENT_SECRET"
+    valueFrom: "azure-client-secret"

@@ -1,9 +1,10 @@
 # Databricks Apps deployment config.
 #
-# `valueFrom` entries below reference Databricks App resources (secrets) by
-# key name — adjust these keys to whatever you actually name the resources
-# when you attach them to this app (Compute -> Apps -> this app -> App
-# resources), or replace with plain `value:` entries for a quick manual test.
+# DEV Databricks SQL credentials are injected as secret-backed env vars (see
+# the "loyalty-approvals" secret scope). PROD isn't wired up yet — its
+# service principal doesn't exist, so those env vars are simply absent here;
+# database.py already treats an unconfigured env as "not configured" rather
+# than crashing.
 command: ["python", "app.py"]
 
 env:
@@ -15,17 +16,9 @@ env:
     valueFrom: "databricks-client-id-dev"
   - name: "DATABRICKS_CLIENT_SECRET_DEV"
     valueFrom: "databricks-client-secret-dev"
-  - name: "DATABRICKS_SERVER_HOSTNAME_PROD"
-    valueFrom: "databricks-server-hostname-prod"
-  - name: "DATABRICKS_HTTP_PATH_PROD"
-    valueFrom: "databricks-http-path-prod"
-  - name: "DATABRICKS_CLIENT_ID_PROD"
-    valueFrom: "databricks-client-id-prod"
-  - name: "DATABRICKS_CLIENT_SECRET_PROD"
-    valueFrom: "databricks-client-secret-prod"
   - name: "CATALOG"
     value: "dev"
   - name: "SCHEMA"
     value: "retail"
   - name: "CORS_ORIGIN"
-    value: "http://localhost:5173"
+    value: "https://uc-store-associate-ui-7405619621865526.6.azure.databricksapps.com"
