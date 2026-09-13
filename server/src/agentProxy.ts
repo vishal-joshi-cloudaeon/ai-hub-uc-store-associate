@@ -4,24 +4,24 @@ import { getAccessToken } from './azureToken.js'
 
 type EnvName = 'dev' | 'prod'
 
-type FoundryEnvConfig = {
-  endpoint: string
-  agentId: string
-}
+// dev now goes through the APIM "AI Hub" gateway (subscription-key auth, its
+// own request/response shape) instead of calling Foundry's Responses API
+// directly with AAD — prod stays on the direct path below.
+type FoundryEnvConfig =
+  | { authType: 'apimKey'; endpoint: string; agentId: string; subscriptionKey: string }
+  | { authType: 'aad'; endpoint: string; agentId: string }
 
 const API_VERSION = process.env.FOUNDRY_API_VERSION || '2025-05-15-preview'
 
-// One AAD identity (DefaultAzureCredential, see azureToken.ts) is shared
-// across both environments — it needs RBAC on both Foundry projects. Each
-// environment's endpoint/agent id are separate config, resolved per request
-// from the `env` field the frontend sends, so one running proxy instance
-// serves both /dev and /prod routes.
 const ENV_CONFIG: Record<EnvName, FoundryEnvConfig> = {
   dev: {
+    authType: 'apimKey',
     endpoint: (process.env.FOUNDRY_AGENT_ENDPOINT_DEV || '').replace(/\/+$/, ''),
     agentId: process.env.FOUNDRY_AGENT_ID_DEV || '',
+    subscriptionKey: process.env.APIM_SUBSCRIPTION_KEY_DEV || '',
   },
   prod: {
+    authType: 'aad',
     endpoint: (process.env.FOUNDRY_AGENT_ENDPOINT_PROD || '').replace(/\/+$/, ''),
     agentId: process.env.FOUNDRY_AGENT_ID_PROD || '',
   },
@@ -39,6 +39,11 @@ function getConfig(env: EnvName): FoundryEnvConfig {
         `and FOUNDRY_AGENT_ID_${env.toUpperCase()} in server/.env.`
     )
   }
+  if (config.authType === 'apimKey' && !config.subscriptionKey) {
+    throw new Error(
+      `APIM subscription key not configured for "${env}". Set APIM_SUBSCRIPTION_KEY_${env.toUpperCase()} in server/.env.`
+    )
+  }
   return config
 }
 
@@ -54,26 +59,54 @@ function getFoundryClient(baseURL: string): AxiosInstance {
 
 export const agentProxyRouter = Router()
 
-// This agent is invoked through Azure AI Foundry's Responses API
+// prod is invoked through Azure AI Foundry's Responses API
 // (POST /openai/responses), not the classic Assistants threads/runs API —
 // the agent's own "Agent ID" isn't an `asst_...` id, it's a plain
 // agent_reference by name. Multi-turn continuity is a `previous_response_id`
 // pointer (like the old Assistants API's thread id, but stateless on our
 // side — the frontend just carries the last response's id forward).
+//
+// dev is invoked through the APIM "AI Hub" gateway instead: a single
+// POST to its `/invoke` route, subscription-key auth, and the agent
+// reference nested under `agent_reference` rather than `agent`.
 agentProxyRouter.post('/responses', async (req, res, next) => {
   try {
     const env = resolveEnv(req.body.env)
-    const { endpoint, agentId } = getConfig(env)
+    const config = getConfig(env)
+
+    if (config.authType === 'apimKey') {
+      const body: Record<string, unknown> = {
+        agent_reference: { type: 'agent_reference', name: config.agentId },
+        input: req.body.input,
+      }
+      if (req.body.previous_response_id) {
+        body.previous_response_id = req.body.previous_response_id
+      }
+
+      const { data } = await axios.post(config.endpoint, body, {
+        headers: {
+          'Ocp-Apim-Subscription-Key': config.subscriptionKey,
+          'Content-Type': 'application/json',
+          // APIM/AML compresses (br/gzip) in a way axios's auto-decompress
+          // doesn't unwrap cleanly through this hop, yielding garbled JSON —
+          // ask for an uncompressed body instead.
+          'Accept-Encoding': 'identity',
+        },
+      })
+      res.json(data)
+      return
+    }
+
     const token = await getAccessToken()
     const body: Record<string, unknown> = {
-      agent: { type: 'agent_reference', name: agentId },
+      agent: { type: 'agent_reference', name: config.agentId },
       input: req.body.input,
     }
     if (req.body.previous_response_id) {
       body.previous_response_id = req.body.previous_response_id
     }
 
-    const { data } = await getFoundryClient(endpoint).post('/openai/responses', body, {
+    const { data } = await getFoundryClient(config.endpoint).post('/openai/responses', body, {
       params: { 'api-version': API_VERSION },
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     })

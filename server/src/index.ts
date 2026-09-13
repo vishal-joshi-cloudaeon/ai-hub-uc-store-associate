@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import express from 'express'
 import cors from 'cors'
 import { agentProxyRouter, agentProxyErrorHandler } from './agentProxy.js'
+import { approvalsProxyRouter, approvalsProxyErrorHandler } from './approvalsProxy.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // Populated at deploy time by copying the built React app (root `npm run
@@ -23,11 +24,14 @@ app.get('/healthz', (_req, res) => res.json({ ok: true }))
 app.use('/agent', agentProxyRouter)
 app.use(agentProxyErrorHandler)
 
+app.use('/approvals-api', approvalsProxyRouter)
+app.use(approvalsProxyErrorHandler)
+
 // Serve the built frontend (if present) with a SPA fallback, so this one
 // process can be deployed as the app's single public listener.
 app.use(express.static(STATIC_DIR))
 app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/agent')) return next()
+  if (req.path.startsWith('/agent') || req.path.startsWith('/approvals-api')) return next()
   res.sendFile(path.join(STATIC_DIR, 'index.html'), (err) => err && next(err))
 })
 

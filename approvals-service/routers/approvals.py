@@ -1,13 +1,27 @@
+import os
 from datetime import timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from config import APPROVAL_TABLE
 from database import execute, query
 from models import Approval, ResolveApprovalBody
 
-router = APIRouter(prefix="/api/approvals", tags=["approvals"])
+# Shared secret with the UI app's server-side proxy (server/src/approvalsProxy.ts) —
+# this app has no browser-facing CORS origin in the Azure deployment, so this
+# is the only thing stopping an arbitrary caller who finds this Web App's URL
+# from reading/resolving approvals. Not required for /tools/*, which Foundry
+# calls directly via its own separately-secured path.
+APPROVALS_API_KEY = os.environ.get("APPROVALS_API_KEY", "")
+
+
+def _check_api_key(x_api_key: str = Header(default="")) -> None:
+    if APPROVALS_API_KEY and x_api_key != APPROVALS_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-Api-Key")
+
+
+router = APIRouter(prefix="/api/approvals", tags=["approvals"], dependencies=[Depends(_check_api_key)])
 
 
 def _iso(value: Any) -> str | None:
