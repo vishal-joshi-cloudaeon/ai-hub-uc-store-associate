@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Message, Store } from '../types'
+import AgentSettingsModal from '../components/AgentSettingsModal'
 import ChatMessage from '../components/ChatMessage'
 import EnvBadge from '../components/EnvBadge'
 import SuggestedQuestions from '../components/SuggestedQuestions'
@@ -7,6 +8,7 @@ import { RECOMMENDED_QUESTIONS } from '../config/recommendedQuestions'
 import { useAgentChat } from '../hooks/useAgentChat'
 import { useApprovalPolling } from '../hooks/useApprovalPolling'
 import { useEnv } from '../hooks/useEnv'
+import { hasAnyOverride, loadOverrides, type AgentOverrides } from '../config/agentOverrides'
 
 const STORES: Store[] = [
   { store_id: 'S001', store_name: 'Aberdeen' },
@@ -29,6 +31,15 @@ export default function ManagerChat() {
   const { env } = useEnv()
   const [storeId, setStoreId] = useState(STORES[0].store_id)
   const [input, setInput] = useState('')
+  const [showSettings, setShowSettings] = useState(false)
+  // Only drives the dot on the gear icon — the values themselves are read
+  // per request in src/api/agent.ts, so this never has to be threaded
+  // through the chat hook.
+  const [usingOverrides, setUsingOverrides] = useState(() => hasAnyOverride(loadOverrides(env)))
+
+  useEffect(() => {
+    setUsingOverrides(hasAnyOverride(loadOverrides(env)))
+  }, [env])
 
   const chat = useAgentChat(storeId, env)
   const messages = chat.messages
@@ -72,6 +83,14 @@ export default function ManagerChat() {
     chat.clear()
   }
 
+  // A previous_response_id belongs to the endpoint/agent that issued it, so
+  // changing the connection starts a fresh conversation rather than trying
+  // to continue the old one somewhere it doesn't exist.
+  const handleSettingsApplied = (next: AgentOverrides) => {
+    setUsingOverrides(hasAnyOverride(next))
+    chat.clear()
+  }
+
   const handleSend = async () => {
     const trimmed = input.trim()
     if (!trimmed || isInputDisabled) return
@@ -87,7 +106,7 @@ export default function ManagerChat() {
   // Stage 1: only the first recommended question, before anything is sent.
   // Stage 2: the remaining two, once the first response has come back.
   // After that, the manager is free-typing — no more suggestions to avoid
-  // clutter. "Clear Demo" resets `messages` to [], which puts this straight
+  // clutter. "Clear chat" resets `messages` to [], which puts this straight
   // back to stage 1.
   const userMessageCount = messages.filter((m) => m.role === 'user').length
   const showFirstSuggestion = userMessageCount === 0 && !isInputDisabled
@@ -102,18 +121,20 @@ export default function ManagerChat() {
     <div className="flex h-screen items-center justify-center bg-gray-100 p-6">
       <div className="flex h-[88vh] w-full max-w-[33vw] min-w-[420px] flex-col overflow-hidden rounded-2xl border border-border bg-white shadow-lg">
         <header className="flex flex-shrink-0 flex-col gap-3 border-b border-border bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-col gap-1">
+          <div className="flex min-w-0 flex-col gap-1">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-text-primary">Store manager</span>
+              <span className="whitespace-nowrap text-sm font-semibold text-text-primary">
+                Store manager
+              </span>
               <EnvBadge />
             </div>
             <span className="text-xs text-text-muted">Loyalty agent</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-shrink-0 items-center gap-2">
             <select
               value={storeId}
               onChange={(e) => handleStoreChange(e.target.value)}
-              className="w-full rounded-card border border-border bg-white px-3 py-1.5 text-sm text-text-primary transition focus:border-text-secondary focus:outline-none sm:w-auto"
+              className="min-w-0 flex-1 rounded-card border border-border bg-white px-2 py-1.5 text-sm text-text-primary transition focus:border-text-secondary focus:outline-none sm:flex-none"
             >
               {STORES.map((store) => (
                 <option key={store.store_id} value={store.store_id}>
@@ -124,9 +145,53 @@ export default function ManagerChat() {
             <button
               type="button"
               onClick={() => chat.clear()}
-              className="flex-shrink-0 rounded-card border border-border bg-white px-3 py-1.5 text-sm text-text-secondary transition hover:bg-gray-50"
+              title="Clear chat"
+              aria-label="Clear chat"
+              className="flex-shrink-0 rounded-card border border-border bg-white p-1.5 text-text-secondary transition hover:bg-gray-50"
             >
-              Clear Demo
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowSettings(true)}
+              title={
+                usingOverrides
+                  ? 'Agent connection — custom values in use'
+                  : 'Agent connection settings'
+              }
+              aria-label="Agent connection settings"
+              className="relative flex-shrink-0 rounded-card border border-border bg-white p-1.5 text-text-secondary transition hover:bg-gray-50"
+            >
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+              {usingOverrides && (
+                <span
+                  className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-brand-amber ring-2 ring-white"
+                  aria-hidden="true"
+                />
+              )}
             </button>
           </div>
         </header>
@@ -203,6 +268,14 @@ export default function ManagerChat() {
           </div>
         </div>
       </div>
+
+      {showSettings && (
+        <AgentSettingsModal
+          env={env}
+          onClose={() => setShowSettings(false)}
+          onApplied={handleSettingsApplied}
+        />
+      )}
     </div>
   )
 }

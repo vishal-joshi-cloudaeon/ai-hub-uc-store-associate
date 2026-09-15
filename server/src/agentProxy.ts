@@ -17,6 +17,11 @@ type FoundryEnvConfig =
 
 const API_VERSION = process.env.FOUNDRY_API_VERSION || '2025-05-15-preview'
 
+// Deliberately empty by default: the endpoint, agent id and subscription key
+// are no longer shipped with the app (they're absent from .env and from the
+// Azure Web App's settings) and are supplied per-session through the chat's
+// Agent connection settings panel instead. These env vars are still read, so
+// a deployment can pre-fill them again, but nothing depends on them being set.
 const ENV_CONFIG: Record<EnvName, FoundryEnvConfig> = {
   dev: {
     authType: 'apimKey',
@@ -36,17 +41,85 @@ function resolveEnv(value: unknown): EnvName {
   return value === 'prod' ? 'prod' : 'dev'
 }
 
-function getConfig(env: EnvName): FoundryEnvConfig {
-  const config = ENV_CONFIG[env]
+/**
+ * A connection problem this app can describe itself, as opposed to an error
+ * coming back from APIM or the agent. The `code` travels to the SPA so the
+ * chat can point the user at the settings panel for exactly the right
+ * reason — see `describeError` in src/api/agent.ts.
+ */
+class ProxyError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: 'connection_not_configured' | 'invalid_override' | 'endpoint_unreachable',
+    message: string
+  ) {
+    super(message)
+    this.name = 'ProxyError'
+  }
+}
+
+/**
+ * Optional per-request connection overrides, sent by the manager chat's
+ * settings panel so a session can be pointed at a different APIM route,
+ * agent or subscription key without a redeploy. Each field is independent:
+ * whatever isn't supplied falls back to this environment's configured value,
+ * and a request with no overrides behaves exactly as before.
+ */
+type ConnectionOverrides = {
+  endpoint?: string
+  agentId?: string
+  subscriptionKey?: string
+}
+
+function parseOverrides(raw: unknown): ConnectionOverrides {
+  if (!raw || typeof raw !== 'object') return {}
+  const body = raw as Record<string, unknown>
+  const text = (value: unknown) =>
+    typeof value === 'string' && value.trim() ? value.trim() : undefined
+  return {
+    endpoint: text(body.endpoint),
+    agentId: text(body.agent_id),
+    subscriptionKey: text(body.subscription_key),
+  }
+}
+
+function getConfig(env: EnvName, overrides: ConnectionOverrides = {}): FoundryEnvConfig {
+  const base = ENV_CONFIG[env]
+
+  if (overrides.endpoint && !/^https?:\/\//i.test(overrides.endpoint)) {
+    throw new ProxyError(
+      400,
+      'invalid_override',
+      'The endpoint must be a full URL starting with https:// (or http:// for a local test).'
+    )
+  }
+
+  const endpoint = (overrides.endpoint ?? base.endpoint).replace(/\/+$/, '')
+  const agentId = overrides.agentId ?? base.agentId
+  const config: FoundryEnvConfig =
+    base.authType === 'apimKey'
+      ? {
+          authType: 'apimKey',
+          endpoint,
+          agentId,
+          subscriptionKey: overrides.subscriptionKey ?? base.subscriptionKey,
+        }
+      : { authType: 'aad', endpoint, agentId }
+
   if (!config.endpoint || !config.agentId) {
-    throw new Error(
-      `Foundry "${env}" environment is not configured. Set FOUNDRY_AGENT_ENDPOINT_${env.toUpperCase()} ` +
-        `and FOUNDRY_AGENT_ID_${env.toUpperCase()} in .env.`
+    throw new ProxyError(
+      500,
+      'connection_not_configured',
+      `No endpoint or agent is configured for the "${env}" environment. Set them in the chat's ` +
+        `Agent connection settings, which send them as "overrides" on the request.`
     )
   }
   if (config.authType === 'apimKey' && !config.subscriptionKey) {
-    throw new Error(
-      `APIM subscription key not configured for "${env}". Set APIM_SUBSCRIPTION_KEY_${env.toUpperCase()} in .env.`
+    throw new ProxyError(
+      500,
+      'connection_not_configured',
+      `No subscription key is configured for the "${env}" environment. Set it in the chat's ` +
+        `Agent connection settings, which send it as an "override" on the request.`
     )
   }
   return config
@@ -80,7 +153,7 @@ export const agentProxyRouter = Router()
 agentProxyRouter.post('/responses', async (req, res, next) => {
   try {
     const env = resolveEnv(req.body.env)
-    const config = getConfig(env)
+    const config = getConfig(env, parseOverrides(req.body.overrides))
 
     if (config.authType === 'apimKey') {
       const body: Record<string, unknown> = {
@@ -125,10 +198,21 @@ agentProxyRouter.post('/responses', async (req, res, next) => {
 })
 
 export const agentProxyErrorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+  if (err instanceof ProxyError) {
+    res.status(err.status).json({ error: { code: err.code, message: err.message } })
+    return
+  }
   if (err instanceof AxiosError && err.response) {
     // Pass Foundry's own status/body straight through — the frontend's
     // detectState/error handling already expects a plain error message.
     res.status(err.response.status).json(err.response.data)
+    return
+  }
+  if (err instanceof AxiosError) {
+    // No response at all: DNS failure, refused connection, timeout. Common
+    // with a mistyped endpoint in the settings panel, so it gets its own
+    // code rather than looking like a gateway rejection.
+    res.status(502).json({ error: { code: 'endpoint_unreachable', message: err.message } })
     return
   }
   console.error(err)

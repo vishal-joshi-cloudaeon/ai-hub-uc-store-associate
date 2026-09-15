@@ -85,6 +85,38 @@ pick the matching Databricks workspace server-side.
   send it as an `X-Api-Key` header. It is enforced **only when set**, so an
   existing agent registration keeps working until that header is added.
 
+### Agent connection overrides (settings panel)
+
+The manager chat's gear icon (next to the clear-chat button) opens a small
+panel with three optional fields — **Endpoint**, **Agent ID** and
+**Subscription key** — so a session can be pointed at a different APIM route,
+a different agent or a different subscription key without a redeploy or an
+`.env` change. Useful for testing a newly provisioned gateway route.
+
+- Values are kept in `localStorage`, **per environment** (`/dev/manager` and
+  `/prod/manager` each have their own set) and per browser.
+- Each field is independent: whatever is left blank falls back to that
+  environment's configured `FOUNDRY_AGENT_ENDPOINT_*` /
+  `FOUNDRY_AGENT_ID_*` / `APIM_SUBSCRIPTION_KEY_*`.
+- They travel as an optional `overrides` object on the existing
+  `POST /agent/responses` body (`endpoint`, `agent_id`, `subscription_key`);
+  the proxy merges them over `ENV_CONFIG` in `server/src/agentProxy.ts`. The
+  outbound request shape is unchanged, and a request without `overrides`
+  behaves exactly as before.
+- **Save** applies the values and starts a fresh conversation (a
+  `previous_response_id` from one agent can't be continued on another);
+  **Clear** removes them and returns to the server's configuration. A dot on
+  the gear icon shows when custom values are in use.
+- A failed send says which layer failed and points back at this panel —
+  nothing configured, endpoint unreachable, key rejected, route not found, or
+  a gateway rejection. An error from the agent *itself* (a Foundry
+  `error.code`, e.g. `tool_user_error`) is shown as-is, since the connection
+  worked and the panel isn't the fix.
+- Note this means a subscription key typed into the panel is held in that
+  browser and sent to the app's own proxy on each call. It's a
+  testing/demo affordance — the server's own configured keys remain the
+  default path and are never exposed to the browser.
+
 ## Environment routing
 
 Every page lives under an environment prefix:
