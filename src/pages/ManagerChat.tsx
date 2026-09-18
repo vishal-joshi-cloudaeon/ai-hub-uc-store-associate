@@ -32,6 +32,7 @@ export default function ManagerChat() {
   const [storeId, setStoreId] = useState(STORES[0].store_id)
   const [input, setInput] = useState('')
   const [showSettings, setShowSettings] = useState(false)
+  const configEnabled = new URLSearchParams(window.location.search).get('config') === 'true'
   // Only drives the dot on the gear icon — the values themselves are read
   // per request in src/api/agent.ts, so this never has to be threaded
   // through the chat hook.
@@ -55,19 +56,35 @@ export default function ManagerChat() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages])
 
+  // Approvals already folded into the transcript, so a re-render (or React's
+  // double-invoked effects in dev) can't post the same outcome twice.
+  const resolvedApprovals = useRef(new Set<string>())
+
   useEffect(() => {
     if (!approvalResult || !awaitingMessage) return
+    if (resolvedApprovals.current.has(approvalResult.approval_id)) return
+    resolvedApprovals.current.add(approvalResult.approval_id)
+
+    const denied = approvalResult.status === 'denied'
+    const resolvedBy = approvalResult.resolved_by ?? 'cluster head'
+
+    // Flip the request's own badge off "Awaiting cluster head approval". It is
+    // the message the manager has been watching, so leaving it pending after
+    // the ruling both reads wrong and keeps `awaitingMessage` latched onto a
+    // resolved approval — which would stop a second request ever polling.
+    chat.updateMessage(awaitingMessage.id, { state: denied ? 'denied' : 'approved' })
+
+    const deniedReason = approvalResult.reason_denied
+      ? `\n\nReason: ${approvalResult.reason_denied}`
+      : ''
 
     const resolutionMessage: Message = {
       id: makeId(),
       role: 'agent',
-      state: approvalResult.status === 'approved' ? 'approved' : 'denied',
-      content:
-        approvalResult.status === 'approved'
-          ? `✓ Approved by ${approvalResult.resolved_by ?? 'cluster head'}. The vouchers are being sent now.`
-          : `✗ Denied by ${approvalResult.resolved_by ?? 'cluster head'}.${
-              approvalResult.reason_denied ? ` Reason: ${approvalResult.reason_denied}` : ''
-            }`,
+      state: denied ? 'denied' : 'approved',
+      content: denied
+        ? `✗ Denied by ${resolvedBy}. No vouchers were sent.${deniedReason}`
+        : `✓ Approved by ${resolvedBy}. The vouchers are being sent now.`,
       timestamp: new Date(),
     }
 
@@ -103,14 +120,19 @@ export default function ManagerChat() {
     await chat.send(question)
   }
 
-  // Stage 1: only the first recommended question, before anything is sent.
-  // Stage 2: the remaining two, once the first response has come back.
-  // After that, the manager is free-typing — no more suggestions to avoid
-  // clutter. "Clear chat" resets `messages` to [], which puts this straight
-  // back to stage 1.
-  const userMessageCount = messages.filter((m) => m.role === 'user').length
-  const showFirstSuggestion = userMessageCount === 0 && !isInputDisabled
-  const showRemainingSuggestions = userMessageCount === 1 && !isInputDisabled
+  // All three recommended questions are offered up front; each one drops off
+  // the list once it has been asked, so the manager sees three, then two,
+  // then one, then none. "Clear chat" resets `messages` to [], which puts
+  // the full list straight back.
+  const askedQuestions = useMemo(
+    () => new Set(messages.filter((m) => m.role === 'user').map((m) => m.content.trim())),
+    [messages]
+  )
+  const pendingQuestions = useMemo(
+    () => RECOMMENDED_QUESTIONS.filter((q) => !askedQuestions.has(q)),
+    [askedQuestions]
+  )
+  const showSuggestions = pendingQuestions.length > 0 && !isInputDisabled
 
   const inputPlaceholder = useMemo(
     () => (isAwaitingApproval ? 'Awaiting cluster head approval...' : 'Message the loyalty agent...'),
@@ -142,6 +164,8 @@ export default function ManagerChat() {
                 </option>
               ))}
             </select>
+            {configEnabled ? (
+              <>
             <button
               type="button"
               onClick={() => chat.clear()}
@@ -193,6 +217,16 @@ export default function ManagerChat() {
                 />
               )}
             </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => chat.clear()}
+                className="rounded-card border border-border bg-white px-3 py-1.5 text-sm text-text-secondary transition hover:bg-gray-50"
+              >
+                Clear
+              </button>
+            )}
           </div>
         </header>
 
@@ -200,10 +234,10 @@ export default function ManagerChat() {
           {messages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 px-4 text-sm text-text-muted">
               <span>Start a conversation with the loyalty agent.</span>
-              {showFirstSuggestion && (
+              {showSuggestions && (
                 <div className="w-full max-w-sm">
                   <SuggestedQuestions
-                    questions={[RECOMMENDED_QUESTIONS[0]]}
+                    questions={pendingQuestions}
                     onSelect={handleSuggestedClick}
                   />
                 </div>
@@ -212,11 +246,8 @@ export default function ManagerChat() {
           ) : (
             messages.map((message) => <ChatMessage key={message.id} message={message} />)
           )}
-          {showRemainingSuggestions && (
-            <SuggestedQuestions
-              questions={RECOMMENDED_QUESTIONS.slice(1)}
-              onSelect={handleSuggestedClick}
-            />
+          {messages.length > 0 && showSuggestions && (
+            <SuggestedQuestions questions={pendingQuestions} onSelect={handleSuggestedClick} />
           )}
           {approvalError && (
             <div className="px-4 py-2">
@@ -279,3 +310,4 @@ export default function ManagerChat() {
     </div>
   )
 }
+ 
