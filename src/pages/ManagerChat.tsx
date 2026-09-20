@@ -1,14 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import type { Message, Store } from '../types'
 import AgentSettingsModal from '../components/AgentSettingsModal'
 import ChatMessage from '../components/ChatMessage'
 import EnvBadge from '../components/EnvBadge'
 import SuggestedQuestions from '../components/SuggestedQuestions'
+import Toast from '../components/Toast'
 import { RECOMMENDED_QUESTIONS } from '../config/recommendedQuestions'
 import { useAgentChat } from '../hooks/useAgentChat'
 import { useApprovalPolling } from '../hooks/useApprovalPolling'
 import { useEnv } from '../hooks/useEnv'
-import { hasAnyOverride, loadOverrides, type AgentOverrides } from '../config/agentOverrides'
+import {
+  isCustomized,
+  loadOverrides,
+  saveOverrides,
+  type AgentOverrides,
+} from '../config/agentOverrides'
+import type { EnvName } from '../config/environments'
 
 const STORES: Store[] = [
   { store_id: 'S001', store_name: 'Aberdeen' },
@@ -23,23 +31,43 @@ const STORES: Store[] = [
   { store_id: 'S010', store_name: 'Plymouth' },
 ]
 
+/** The store the chat opens on, in both dev and prod — the demo data sits on
+ * this one, so it's the useful starting point rather than S001. */
+const DEFAULT_STORE_ID = 'S004'
+
 function makeId() {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 export default function ManagerChat() {
   const { env } = useEnv()
-  const [storeId, setStoreId] = useState(STORES[0].store_id)
+  const [storeId, setStoreId] = useState(DEFAULT_STORE_ID)
   const [input, setInput] = useState('')
   const [showSettings, setShowSettings] = useState(false)
-  const configEnabled = new URLSearchParams(window.location.search).get('config') === 'true'
+  const [searchParams] = useSearchParams()
+  const configEnabled = searchParams.get('config') === 'true'
   // Only drives the dot on the gear icon — the values themselves are read
   // per request in src/api/agent.ts, so this never has to be threaded
   // through the chat hook.
-  const [usingOverrides, setUsingOverrides] = useState(() => hasAnyOverride(loadOverrides(env)))
+  const [usingOverrides, setUsingOverrides] = useState(() => isCustomized(env, loadOverrides(env)))
+  const [toast, setToast] = useState<string | null>(null)
+
+  // The settings panel's Save, run on the user's behalf at startup: it
+  // normalises and stores whatever connection is in effect for this
+  // environment (its built-in default, unless the user has saved their own),
+  // so the chat is configured before the first message instead of only once
+  // someone opens the gear. Silent apart from the toast — the panel never
+  // appears. Keyed by env so switching dev <-> prod re-applies for the
+  // environment now in view, and so React's double-invoked effects in dev
+  // can't fire it twice.
+  const autoAppliedEnv = useRef<EnvName | null>(null)
 
   useEffect(() => {
-    setUsingOverrides(hasAnyOverride(loadOverrides(env)))
+    if (autoAppliedEnv.current === env) return
+    autoAppliedEnv.current = env
+    const applied = saveOverrides(env, loadOverrides(env))
+    setUsingOverrides(isCustomized(env, applied))
+    setToast('Application loaded successfully')
   }, [env])
 
   const chat = useAgentChat(storeId, env)
@@ -104,7 +132,7 @@ export default function ManagerChat() {
   // changing the connection starts a fresh conversation rather than trying
   // to continue the old one somewhere it doesn't exist.
   const handleSettingsApplied = (next: AgentOverrides) => {
-    setUsingOverrides(hasAnyOverride(next))
+    setUsingOverrides(isCustomized(env, next))
     chat.clear()
   }
 
@@ -307,6 +335,8 @@ export default function ManagerChat() {
           onApplied={handleSettingsApplied}
         />
       )}
+
+      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>
   )
 }

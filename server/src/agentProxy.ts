@@ -17,23 +17,48 @@ type FoundryEnvConfig =
 
 const API_VERSION = process.env.FOUNDRY_API_VERSION || '2025-05-15-preview'
 
-// Deliberately empty by default: the endpoint, agent id and subscription key
-// are no longer shipped with the app (they're absent from .env and from the
-// Azure Web App's settings) and are supplied per-session through the chat's
-// Agent connection settings panel instead. These env vars are still read, so
-// a deployment can pre-fill them again, but nothing depends on them being set.
+// What each environment falls back to when a request carries no overrides and
+// nothing is set in the process environment. These are the same values the
+// chat's settings panel is pre-filled with (src/config/agentOverrides.ts),
+// duplicated here so a request that arrives without overrides still works
+// rather than failing as "not configured" — the SPA sends them on every call,
+// but a stale cached bundle or any other client wouldn't.
+// Precedence per field: request override > env var > this default.
+type Connection = { endpoint: string; agentId: string; subscriptionKey: string }
+
+const DEFAULT_CONNECTION: Record<EnvName, Connection> = {
+  dev: {
+    endpoint:
+      'https://dta-euw-prod-apim-01.azure-api.net/saw-loyalty-agent-conversational-retail-assistant/invoke',
+    agentId: 'Loyalty-Agent',
+    subscriptionKey: 'd7d357c8f0f443eb8d6617f1c551a2a7',
+  },
+  prod: {
+    endpoint:
+      'https://dta-euw-prod-apim-02.azure-api.net/saw-loyalty-agent-conversational-retail-assistant/invoke',
+    agentId: 'Loyalty-Agent',
+    subscriptionKey: '65c6bbf3ea0547a8b2d6bc61273ccb9c',
+  },
+}
+
 const ENV_CONFIG: Record<EnvName, FoundryEnvConfig> = {
   dev: {
     authType: 'apimKey',
-    endpoint: (process.env.FOUNDRY_AGENT_ENDPOINT_DEV || '').replace(/\/+$/, ''),
-    agentId: process.env.FOUNDRY_AGENT_ID_DEV || '',
-    subscriptionKey: process.env.APIM_SUBSCRIPTION_KEY_DEV || '',
+    endpoint: (
+      process.env.FOUNDRY_AGENT_ENDPOINT_DEV || DEFAULT_CONNECTION.dev.endpoint
+    ).replace(/\/+$/, ''),
+    agentId: process.env.FOUNDRY_AGENT_ID_DEV || DEFAULT_CONNECTION.dev.agentId,
+    subscriptionKey:
+      process.env.APIM_SUBSCRIPTION_KEY_DEV || DEFAULT_CONNECTION.dev.subscriptionKey,
   },
   prod: {
     authType: 'apimKey',
-    endpoint: (process.env.FOUNDRY_AGENT_ENDPOINT_PROD || '').replace(/\/+$/, ''),
-    agentId: process.env.FOUNDRY_AGENT_ID_PROD || '',
-    subscriptionKey: process.env.APIM_SUBSCRIPTION_KEY_PROD || '',
+    endpoint: (
+      process.env.FOUNDRY_AGENT_ENDPOINT_PROD || DEFAULT_CONNECTION.prod.endpoint
+    ).replace(/\/+$/, ''),
+    agentId: process.env.FOUNDRY_AGENT_ID_PROD || DEFAULT_CONNECTION.prod.agentId,
+    subscriptionKey:
+      process.env.APIM_SUBSCRIPTION_KEY_PROD || DEFAULT_CONNECTION.prod.subscriptionKey,
   },
 }
 

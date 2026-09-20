@@ -7,7 +7,7 @@ export default function EnvGuard({ children }: { children: ReactNode }) {
   const { env } = useParams<{ env: string }>()
 
   if (!env || !VALID_ENVS.includes(env)) {
-    return <Navigate to="/dev/manager" replace />
+    return <Navigate to="/dev/manager?config=true" replace />
   }
 
   return <>{children}</>

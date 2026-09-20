@@ -1,20 +1,23 @@
 /**
- * Per-environment agent connection overrides, entered by the user in the
- * manager chat's settings panel and kept in localStorage.
+ * Per-environment agent connection values, shown in the manager chat's
+ * settings panel (the gear icon) and kept in localStorage.
  *
- * These exist purely so a demo/testing session can be pointed at a different
- * APIM route, a different agent or a different subscription key without a
- * redeploy or an .env change. Nothing about the call itself changes: the SPA
- * still posts to this app's own /agent/responses proxy, and the proxy still
- * builds the same request — it just reads these values instead of its
+ * Each environment ships with a working default connection (DEFAULT_OVERRIDES
+ * below), so the chat talks to the right APIM route with no setup. The panel
+ * exists so a demo/testing session can be pointed at a different APIM route,
+ * a different agent or a different subscription key without a redeploy or an
+ * .env change. Nothing about the call itself changes: the SPA still posts to
+ * this app's own /agent/responses proxy, and the proxy still builds the same
+ * request — it just reads these values instead of its
  * FOUNDRY_AGENT_ENDPOINT_* / FOUNDRY_AGENT_ID_* / APIM_SUBSCRIPTION_KEY_*
- * defaults for the fields that are filled in.
+ * environment variables.
  *
- * Each field is independent: leave one blank and the server's configured
- * value for that environment is used for it.
+ * Each field is independent: clear one and that environment's default is used
+ * for it. Clearing all of them puts the environment back on its defaults
+ * entirely, and nothing is left in localStorage.
  *
  * Keyed by environment, since dev and prod are different gateways with
- * different keys and must never share an override.
+ * different keys and must never share a value.
  */
 import type { EnvName } from './environments'
 
@@ -30,13 +33,23 @@ export const EMPTY_OVERRIDES: AgentOverrides = {
   subscriptionKey: '',
 }
 
-/** Shown as input placeholders so the expected shape of each field is
- * obvious. Deliberately not the real values — the subscription key is a
- * made-up 32-hex string of the right length. */
-export const OVERRIDE_PLACEHOLDERS: AgentOverrides = {
-  endpoint: 'https://dta-euw-prod-apim-01.azure-api.net/<api-route>/invoke',
-  agentId: 'Loyalty-Agent',
-  subscriptionKey: '0a1b2c3d4e5f60718293a4b5c6d7e8f9',
+/** The connection each environment uses unless the panel says otherwise —
+ * dev via apim-01, prod via apim-02, each with its own subscription key.
+ * These are sent with every request, so the server's FOUNDRY_* / APIM_* env
+ * vars are never reached for a field that has a default here. */
+export const DEFAULT_OVERRIDES: Record<EnvName, AgentOverrides> = {
+  dev: {
+    endpoint:
+      'https://dta-euw-prod-apim-01.azure-api.net/saw-loyalty-agent-conversational-retail-assistant/invoke',
+    agentId: 'Loyalty-Agent',
+    subscriptionKey: 'd7d357c8f0f443eb8d6617f1c551a2a7',
+  },
+  prod: {
+    endpoint:
+      'https://dta-euw-prod-apim-02.azure-api.net/saw-loyalty-agent-conversational-retail-assistant/invoke',
+    agentId: 'Loyalty-Agent',
+    subscriptionKey: '65c6bbf3ea0547a8b2d6bc61273ccb9c',
+  },
 }
 
 const STORAGE_PREFIX = 'uc-store-associate:agent-overrides'
@@ -55,29 +68,40 @@ function normalize(raw: unknown): AgentOverrides {
   }
 }
 
+/** Fills each blank field from the environment's default, so callers always
+ * get a complete, usable connection. */
+function withDefaults(env: EnvName, overrides: AgentOverrides): AgentOverrides {
+  const defaults = DEFAULT_OVERRIDES[env]
+  return {
+    endpoint: overrides.endpoint || defaults.endpoint,
+    agentId: overrides.agentId || defaults.agentId,
+    subscriptionKey: overrides.subscriptionKey || defaults.subscriptionKey,
+  }
+}
+
 export function loadOverrides(env: EnvName): AgentOverrides {
   try {
     const stored = window.localStorage.getItem(storageKey(env))
-    return stored ? normalize(JSON.parse(stored)) : { ...EMPTY_OVERRIDES }
+    return withDefaults(env, stored ? normalize(JSON.parse(stored)) : EMPTY_OVERRIDES)
   } catch {
     // Private-window / blocked storage / corrupt JSON — fall back to the
-    // server's own configuration rather than breaking the page.
-    return { ...EMPTY_OVERRIDES }
+    // environment's defaults rather than breaking the page.
+    return { ...DEFAULT_OVERRIDES[env] }
   }
 }
 
 export function saveOverrides(env: EnvName, overrides: AgentOverrides): AgentOverrides {
-  const normalized = normalize(overrides)
+  const effective = withDefaults(env, normalize(overrides))
   try {
-    if (hasAnyOverride(normalized)) {
-      window.localStorage.setItem(storageKey(env), JSON.stringify(normalized))
+    if (isCustomized(env, effective)) {
+      window.localStorage.setItem(storageKey(env), JSON.stringify(effective))
     } else {
       window.localStorage.removeItem(storageKey(env))
     }
   } catch {
     /* ignore — the values still apply for this page's lifetime via the caller */
   }
-  return normalized
+  return effective
 }
 
 export function clearOverrides(env: EnvName): AgentOverrides {
@@ -86,15 +110,23 @@ export function clearOverrides(env: EnvName): AgentOverrides {
   } catch {
     /* ignore */
   }
-  return { ...EMPTY_OVERRIDES }
+  return { ...DEFAULT_OVERRIDES[env] }
 }
 
-export function hasAnyOverride(overrides: AgentOverrides): boolean {
-  return Boolean(overrides.endpoint || overrides.agentId || overrides.subscriptionKey)
+/** True when the values in effect differ from what the environment ships
+ * with — drives the dot on the gear icon and the panel's Reset button. */
+export function isCustomized(env: EnvName, overrides: AgentOverrides): boolean {
+  const defaults = DEFAULT_OVERRIDES[env]
+  return (
+    overrides.endpoint !== defaults.endpoint ||
+    overrides.agentId !== defaults.agentId ||
+    overrides.subscriptionKey !== defaults.subscriptionKey
+  )
 }
 
-/** The snake_case subset the proxy reads, with blank fields omitted so the
- * server keeps its own value for each one it doesn't receive. */
+/** The snake_case subset the proxy reads. Every field is always populated
+ * (blank ones fall back to the environment's default), so the proxy never has
+ * to reach for its own configuration. */
 export function overridePayload(env: EnvName): Record<string, string> | undefined {
   const { endpoint, agentId, subscriptionKey } = loadOverrides(env)
   const payload: Record<string, string> = {}

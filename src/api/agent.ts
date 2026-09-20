@@ -1,7 +1,7 @@
 import axios from 'axios'
 import type { Message, MessageState, ToolCall } from '../types'
 import type { EnvName } from '../config/environments'
-import { hasAnyOverride, loadOverrides, overridePayload } from '../config/agentOverrides'
+import { isCustomized, loadOverrides, overridePayload } from '../config/agentOverrides'
 
 // The browser never talks to Azure AI Foundry directly, and never holds a
 // Foundry API key or AAD token — it only calls this app's own backend proxy
@@ -164,24 +164,25 @@ type ErrorBody = {
 
 const SETTINGS_LOCATION = 'the gear icon at the top right'
 
-// The connection values live only in the settings panel now — the server
-// ships with no endpoint/agent/key of its own — so "go and fill them in" is
-// the right thing to say when nothing has been saved yet.
+// Each environment ships with a default endpoint/agent/key, and the panel is
+// the only place to point it somewhere else — so "go and check them" is the
+// right thing to say when the defaults haven't worked.
 function missingConnectionHint(env: EnvName): string {
   return (
-    `Open Agent connection settings (${SETTINGS_LOCATION}) and enter the Endpoint, Agent ID and ` +
-    `Subscription key to use for ${env.toUpperCase()}, then send the message again.`
+    `Open Agent connection settings (${SETTINGS_LOCATION}) and check the Endpoint, Agent ID and ` +
+    `Subscription key used for ${env.toUpperCase()}, then send the message again.`
   )
 }
 
-// Appended to failures that happened *at* the gateway. If the user has
-// already saved connection values, this stays silent: a gateway rejection
-// says nothing about whether those values are right (an APIM policy that
-// throws before routing returns the same 500 for every endpoint, agent and
-// key, including none at all), so sending them back to re-check settings
-// they've already filled in just sends them round in circles.
-function settingsHintIfUnset(env: EnvName): string {
-  return hasAnyOverride(loadOverrides(env)) ? '' : `
+// Appended to failures that happened *at* the gateway, but only while the
+// environment is still on its defaults — those are the values worth
+// questioning. Once the user has saved their own, this stays silent: a
+// gateway rejection says nothing about whether they're right (an APIM policy
+// that throws before routing returns the same 500 for every endpoint, agent
+// and key), so sending them back to re-check settings they've already filled
+// in just sends them round in circles.
+function settingsHintIfDefault(env: EnvName): string {
+  return isCustomized(env, loadOverrides(env)) ? '' : `
 
 ${missingConnectionHint(env)}`
 }
@@ -228,7 +229,7 @@ Fix it in Agent connection settings (${SETTINGS_LOCATION}).`)
 
 ` +
         `Details: ${body.error?.message ?? 'no response from the endpoint'}` +
-        settingsHintIfUnset(env)
+        settingsHintIfDefault(env)
     )
   }
 
@@ -257,7 +258,7 @@ Fix it in Agent connection settings (${SETTINGS_LOCATION}).`)
 ` +
       `Gateway response: ${gatewayMessage}` +
       (body.activityId ? ` (activityId: ${body.activityId})` : '') +
-      settingsHintIfUnset(env)
+      settingsHintIfDefault(env)
   )
 }
 

@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import {
-  OVERRIDE_PLACEHOLDERS,
+  DEFAULT_OVERRIDES,
   clearOverrides,
-  hasAnyOverride,
+  isCustomized,
   loadOverrides,
   saveOverrides,
   type AgentOverrides,
@@ -12,7 +12,7 @@ import type { EnvName } from '../config/environments'
 type AgentSettingsModalProps = {
   env: EnvName
   onClose: () => void
-  /** Called after Save or Clear with the values now in effect, so the page
+  /** Called after Save or Reset with the values now in effect, so the page
    * can refresh its indicator and start a fresh conversation (a
    * previous_response_id from one agent/endpoint is meaningless on another). */
   onApplied: (overrides: AgentOverrides) => void
@@ -68,12 +68,12 @@ export default function AgentSettingsModal({ env, onClose, onApplied }: AgentSet
     onClose()
   }
 
-  const handleClear = () => {
-    const cleared = clearOverrides(env)
-    setValues(cleared)
+  const handleReset = () => {
+    const defaults = clearOverrides(env)
+    setValues(defaults)
     setError(null)
-    setStatus(`Cleared — ${env.toUpperCase()} is back to the server's configured values.`)
-    onApplied(cleared)
+    setStatus(`Reset — ${env.toUpperCase()} is back to its default connection.`)
+    onApplied(defaults)
   }
 
   return (
@@ -83,8 +83,9 @@ export default function AgentSettingsModal({ env, onClose, onApplied }: AgentSet
           <div>
             <h2 className="text-base font-semibold text-text-primary">Agent connection</h2>
             <p className="mt-1 text-xs text-text-secondary">
-              Overrides used for <span className="font-medium">{env.toUpperCase()}</span> chat only.
-              Leave a field blank to keep the server's configured value for it.
+              Used for <span className="font-medium">{env.toUpperCase()}</span> chat only, and
+              pre-filled with that environment's default. Clear a field to put it back on the
+              default.
             </p>
           </div>
           <button
@@ -111,7 +112,11 @@ export default function AgentSettingsModal({ env, onClose, onApplied }: AgentSet
                   type={field.secret && !showSecret ? 'password' : 'text'}
                   value={values[field.key]}
                   onChange={(e) => setField(field.key, e.target.value)}
-                  placeholder={OVERRIDE_PLACEHOLDERS[field.key]}
+                  placeholder={
+                    field.secret && !showSecret
+                      ? 'Default subscription key'
+                      : DEFAULT_OVERRIDES[env][field.key]
+                  }
                   spellCheck={false}
                   autoComplete="off"
                   className={`w-full rounded-card border border-border px-3 py-2 text-sm text-text-primary transition placeholder:text-text-muted focus:border-brand-blue focus:outline-none ${
@@ -148,11 +153,11 @@ export default function AgentSettingsModal({ env, onClose, onApplied }: AgentSet
         <div className="mt-5 flex gap-3">
           <button
             type="button"
-            onClick={handleClear}
-            disabled={!hasAnyOverride(values)}
+            onClick={handleReset}
+            disabled={!isCustomized(env, values)}
             className="flex-1 rounded-card border border-border px-4 py-2 text-sm font-medium text-text-secondary transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Clear
+            Reset to default
           </button>
           <button
             type="button"
